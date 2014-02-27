@@ -3,6 +3,7 @@
 namespace Stillman\Kohana;
 
 use Arr;
+use Database_Exception;
 use DB;
 
 class ActiveRecord
@@ -23,6 +24,8 @@ class ActiveRecord
 	public static $primary_key = 'Id';
 
 	protected $_criteria = [];
+
+	protected $_errors = [];
 
 	public static function model($class = null)
 	{
@@ -68,6 +71,59 @@ class ActiveRecord
 		}
 
 		$object->afterLoad();
+		return $object;
+	}
+
+	/**
+	 * Create object (including compound objects) from array of data
+	 *
+	 * @param   array  $values  Data array
+	 * @return  \Stillman\Kohana\ActiveRecord
+	 */
+	protected static function _createObject(array $values)
+	{
+		foreach ($values as $key => $value)
+		{
+			if (strpos($key, ':') === false)
+			{
+				$objects['__self__'][$key] = $value;
+			}
+			else
+			{
+				list($related, $name) = explode(':', $key, 2);
+				$objects[$related][$name] = $value;
+			}
+		}
+
+		$object = static::create($objects['__self__'], false);
+		unset($objects['__self__']);
+
+		foreach ($objects as $name => $values)
+		{
+			if (strpos($name, '.') === false)
+			{
+				$related_class_name = static::$relations[$name]['class'];
+				$object->$name = $related_class_name::create($values, false);
+			}
+			else
+			{
+				// Nested objects (ex., user.profile)
+
+				$parts = explode('.', $name);
+				$class = $object->{$parts[0]};
+				unset($parts[0]);
+				$last = $parts[count($parts)];
+
+				foreach ($parts as $part)
+				{
+					$class->$part = 1;
+				}
+
+				$cls = $class::$relations[$last]['class'];
+				$class->$last = $cls::create($values);
+			}
+		}
+
 		return $object;
 	}
 
@@ -185,6 +241,14 @@ class ActiveRecord
 		return $this;
 	}
 
+	/**
+	 * Get primary key value
+	 */
+	public function pk()
+	{
+		return $this->{static::$primary_key};
+	}
+
 	public function getCriteria()
 	{
 		return $this->_criteria;
@@ -235,6 +299,65 @@ class ActiveRecord
 		return (int) DB::find($criteria)->execute()->get('cnt');
 	}
 
+	public function save($run_validation = true, array $fields = null)
+	{
+		if ( ! $run_validation or $this->validate())
+		{
+			$data = $this->beforeSave($fields);
+
+			if ($this->isNew())
+			{
+				list($this->{static::$primary_key}) = DB::insert(static::$table_name, array_keys($data))
+					->values($data)
+					->execute();
+			}
+			else
+			{
+				DB::update(static::$table_name)
+					->set($data)
+					->where(static::$primary_key, '=', $this->{static::$primary_key})
+					->execute();
+			}
+
+			$this->afterSave();
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Mass assign values
+	 * Example: $model->assign($_POST);
+	 * Mass-assignment fields must have 'safe' attribute
+	 *
+	 * @param   array  $data
+	 * @return  $this
+	 */
+	public function assign(array $data)
+	{
+		foreach ($data as $field => $value)
+		{
+			if ( ! empty(static::$fields[$field]['safe']))
+			{
+				$this->$field = $value;
+			}
+		}
+
+		return $this;
+	}
+
+	public function validate()
+	{
+		$this->_errors = [];
+		return true;
+	}
+
+	public function getErrors()
+	{
+		return $this->_errors;
+	}
+
 	protected function _find($multiple, $key = null)
 	{
 		$result = DB::find($this->_criteria)->execute();
@@ -267,60 +390,39 @@ class ActiveRecord
 		return $arr;
 	}
 
-	/**
-	 * Create object (including compound objects) from array of data
-	 *
-	 * @param   array  $values  Data array
-	 * @return  \Stillman\Kohana\ActiveRecord
-	 */
-	protected static function _createObject(array $values)
+	protected function afterLoad()
 	{
-		foreach ($values as $key => $value)
-		{
-			if (strpos($key, ':') === false)
-			{
-				$objects['__self__'][$key] = $value;
-			}
-			else
-			{
-				list($related, $name) = explode(':', $key, 2);
-				$objects[$related][$name] = $value;
-			}
-		}
-
-		$object = static::create($objects['__self__'], false);
-		unset($objects['__self__']);
-
-		foreach ($objects as $name => $values)
-		{
-			if (strpos($name, '.') === false)
-			{
-				$related_class_name = static::$relations[$name]['class'];
-				$object->$name = $related_class_name::create($values, false);
-			}
-			else
-			{
-				// Nested objects (ex., user.profile)
-
-				$parts = explode('.', $name);
-				$class = $object->{$parts[0]};
-				unset($parts[0]);
-				$last = $parts[count($parts)];
-
-				foreach ($parts as $part)
-				{
-					$class->$part = 1;
-				}
-
-				$cls = $class::$relations[$last]['class'];
-				$class->$last = $cls::create($values);
-			}
-		}
-
-		return $object;
+		//
 	}
 
-	protected function afterLoad()
+	/**
+	 * Extract object data for saving
+	 *
+	 * @param   array  $fields  Fields to extract
+	 * @return  array
+	 */
+	protected function beforeSave(array $fields = null)
+	{
+		if ( ! $fields)
+		{
+			$fields = array_keys(static::$fields);
+		}
+
+		$result = [];
+
+		foreach ($fields as $field)
+		{
+			if (isset($this->$field))
+			{
+				$result[$field] = $this->$field;
+			}
+		}
+
+		unset($result[static::$primary_key]);
+		return $result;
+	}
+
+	protected function afterSave()
 	{
 		//
 	}
