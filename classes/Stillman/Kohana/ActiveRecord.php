@@ -3,7 +3,6 @@
 namespace Stillman\Kohana;
 
 use Arr;
-use Database_Exception;
 use DB;
 
 class ActiveRecord
@@ -19,7 +18,12 @@ class ActiveRecord
 	const RIGHT_JOIN = 'RIGHT JOIN';
 	const INNER_JOIN = 'INNER JOIN';
 
+	// Set to true to enable profiling
+	public static $profiling = false;
+
 	public static $fields = [];
+
+	public static $relations = [];
 
 	public static $primary_key = 'Id';
 
@@ -360,7 +364,21 @@ class ActiveRecord
 
 	protected function _find($multiple, $key = null)
 	{
-		$result = DB::find($this->_criteria)->execute();
+		$query = DB::find($this->_criteria);
+		$start_time = microtime(true);
+		$result = $query->execute();
+
+		if (static::$profiling)
+		{
+			$sql = (string) $query;
+			$time_delta = sprintf('%.3F', microtime(true) - $start_time);
+
+			file_put_contents(
+				APPPATH.'logs/ActiveRecord.log',
+				"Time: $time_delta\n---\n$sql\n---\nPage url: {$_SERVER['REQUEST_URI']}\n=========================\n",
+				FILE_APPEND
+			);
+		}
 
 		if ( ! $multiple)
 		{
@@ -425,5 +443,20 @@ class ActiveRecord
 	protected function afterSave()
 	{
 		//
+	}
+
+	public function __sleep()
+	{
+		$result = [];
+
+		foreach (array_merge(array_keys(static::$fields), array_keys(static::$relations)) as $field)
+		{
+			if (property_exists($this, $field))
+			{
+				$result[] = $field;
+			}
+		}
+
+		return $result;
 	}
 }
