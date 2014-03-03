@@ -17,6 +17,6 @@
 
 	"require": {
 		"php": ">=5.3.3",
-		"stillman/kohana-db": "dev"
+		"stillman/kohana-db": ">=0.1.0"
 	}
 }
