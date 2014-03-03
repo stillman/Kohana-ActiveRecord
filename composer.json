@@ -1,8 +1,8 @@
 {
 	"name": "stillman/kohana-activerecord",
 	"description": "ActiveRecord pattern for Kohana 3.x",
-	"type": "library",
-	"keywords": ["Kohana", "database", "AR", "ActiveRecord", "Active Record"],
+	"type": "kohana-module",
+	"keywords": ["Kohana", "database", "ar", "activerecord", "active record"],
 	"homepage": "http://github.com/Stillman/Kohana-ActiveRecord",
 	"license": "GPL",
 
@@ -17,6 +17,7 @@
 
 	"require": {
 		"php": ">=5.3.3",
-		"stillman/kohana-db": ">=0.1.0"
+		"composer/installers": "~1.0",
+		"stillman/kohana-db": "~1.0"
 	}
 }
