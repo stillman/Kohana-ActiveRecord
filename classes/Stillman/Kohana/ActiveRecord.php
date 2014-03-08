@@ -292,6 +292,23 @@ class ActiveRecord
 		return $this->findBy(static::$primary_key, $id, $criteria);
 	}
 
+	public function delete()
+	{
+		if ($this->isNew())
+		{
+			throw new ActiveRecord\Exception('Can not delete object that hasn\'t been saved yet');
+		}
+
+		$this->beforeDelete();
+		return DB::delete(static::$table_name)->where(static::$primary_key, '=', $this->pk())->execute();
+		$this->afterDelete();
+	}
+
+	public function deleteAll()
+	{
+		return DB::delete_rows(['FROM' => static::$table_name] + $this->_criteria)->execute();
+	}
+
 	public function count()
 	{
 		// Import criteria locally
@@ -408,11 +425,6 @@ class ActiveRecord
 		return $arr;
 	}
 
-	protected function afterLoad()
-	{
-		//
-	}
-
 	/**
 	 * Extract object data for saving
 	 *
@@ -440,10 +452,10 @@ class ActiveRecord
 		return $result;
 	}
 
-	protected function afterSave()
-	{
-		//
-	}
+	protected function afterLoad() {}
+	protected function afterSave() {}
+	protected function beforeDelete() {}
+	protected function afterDelete() {}
 
 	public function __sleep()
 	{
