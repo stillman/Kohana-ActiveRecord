@@ -180,6 +180,27 @@ class ActiveRecord
 		return $this;
 	}
 
+	/**
+	 * Remove named condition added by ActiveRecord::addCondition method.
+	 *
+	 * Example:
+	 *
+	 * // Adding named condition
+	 * $model->addCondition(['name' => 'field = 1']);
+	 * // Remove the previously added condition
+	 * $model->removeCondition('name');
+	 *
+	 * @since  1.1.1
+	 *
+	 * @param  string  $name  Condition name
+	 * @return $this
+	 */
+	public function removeCondition($name)
+	{
+		unset($this->_criteria['WHERE'][$name]);
+		return $this;
+	}
+
 	public function with($alias, $join_type = null)
 	{
 		if ($join_type === null)
