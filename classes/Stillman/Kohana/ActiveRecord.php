@@ -3,6 +3,7 @@
 namespace Stillman\Kohana;
 
 use Arr;
+use Database;
 use DB;
 
 class ActiveRecord
@@ -30,6 +31,22 @@ class ActiveRecord
 	protected $_criteria = [];
 
 	protected $_errors = [];
+
+	/**
+	 * @var string Current scenario
+	 * @since 1.1.2
+	 */
+	protected $_scenario = 'default';
+
+	/**
+	 * @var array Actual data
+	 */
+	protected $_data = [];
+
+	/**
+	 * @var array Related objects
+	 */
+	protected $_related_objects = [];
 
 	public static function model($class = null)
 	{
@@ -201,13 +218,19 @@ class ActiveRecord
 		return $this;
 	}
 
-	public function with($alias, $join_type = null)
+	/**
+	 * Load relation along with object
+	 *
+	 * @throws \Stillman\Kohana\ActiveRecord\Exception;
+	 *
+	 * @param  string  $alias          Relation name
+	 * @param  string  $join_type      Join type
+	 * @param  array   $filter_params  Filter parameters (if there are)
+	 *
+	 * @return $this
+	 */
+	public function with($alias, $join_type = self::LEFT_JOIN, array $filter_params = [])
 	{
-		if ($join_type === null)
-		{
-			$join_type = static::LEFT_JOIN;
-		}
-
 		// Dotted relations, ex. user.profile
 		$parts = explode('.', $alias);
 
@@ -243,14 +266,27 @@ class ActiveRecord
 
 		$relation_type = $class1::$relations[$_]['relation_type'];
 
+		$filter = ! empty($class1::$relations[$_]['filter']) ? ' AND '.$class1::$relations[$_]['filter'] : '';
+
+		if ($filter)
+		{
+			$filter = str_replace('[relation]', "`$table2alias`", $filter);
+
+			if ($filter_params)
+			{
+				$db = Database::instance();
+				$filter = strtr($filter, array_map([$db, 'quote'], $filter_params));
+			}
+		}
+
 		switch ($relation_type)
 		{
 			case static::HAS_ONE:
-				$criteria['JOIN'][$alias] = "$join_type ".$class2::$table_name." AS `$table2alias` ON `$table2alias`.`".$class1::$relations[$_]['fk']."` = `$table1alias`.`".$class1::$primary_key.'`';
+				$criteria['JOIN'][$alias] = "$join_type ".$class2::$table_name." AS `$table2alias` ON `$table2alias`.`".$class1::$relations[$_]['fk']."` = `$table1alias`.`".$class1::$primary_key.'`'.$filter;
 				break;
 
 			case static::BELONGS_TO:
-				$criteria['JOIN'][$alias] = "$join_type ".$class2::$table_name." AS `$table2alias` ON `$table1alias`.`".$class1::$relations[$_]['fk']."` = `$table2alias`.`".$class2::$primary_key.'`';
+				$criteria['JOIN'][$alias] = "$join_type ".$class2::$table_name." AS `$table2alias` ON `$table1alias`.`".$class1::$relations[$_]['fk']."` = `$table2alias`.`".$class2::$primary_key.'`'.$filter;
 				break;
 
 			default:
@@ -341,23 +377,52 @@ class ActiveRecord
 		return (int) DB::find($criteria)->execute()->get('cnt');
 	}
 
+	/**
+	 * Get the current scenario
+	 *
+	 * @since 1.1.2
+	 *
+	 * @return string
+	 */
+	public function getScenario()
+	{
+		return $this->_scenario;
+	}
+
+	/**
+	 * Set the current scenario
+	 *
+	 * @since 1.1.2
+	 *
+	 * @return $this
+	 */
+	public function setScenario($scenario)
+	{
+		$this->_scenario = $scenario;
+		return $this;
+	}
+
 	public function save($run_validation = true, array $fields = null)
 	{
 		if ( ! $run_validation or $this->validate())
 		{
 			$data = $this->beforeSave($fields);
+			$pk = isset($data[static::$primary_key]) ? $data[static::$primary_key] : null;
+			unset($data[static::$primary_key]);
 
-			if ($this->isNew())
+			if ( ! $pk)
 			{
+				// Adding a new record
 				list($this->{static::$primary_key}) = DB::insert(static::$table_name, array_keys($data))
 					->values($data)
 					->execute();
 			}
 			else
 			{
+				// Updating existing record
 				DB::update(static::$table_name)
 					->set($data)
-					->where(static::$primary_key, '=', $this->{static::$primary_key})
+					->where(static::$primary_key, '=', $pk)
 					->execute();
 			}
 
@@ -389,15 +454,59 @@ class ActiveRecord
 		return $this;
 	}
 
+	/**
+	 * Validate the model
+	 *
+	 * @return  bool  Was the validation success
+	 */
 	public function validate()
 	{
 		$this->_errors = [];
 		return true;
 	}
 
+	/**
+	 * Retreive the validation errors
+	 *
+	 * @return  array
+	 */
 	public function getErrors()
 	{
 		return $this->_errors;
+	}
+
+	/**
+	 * Lazy load a relation
+	 *
+	 * @param  string  $relation_name The name of a relation
+	 *
+	 * @return $this
+	 */
+	protected function _loadRelation($relation_name)
+	{
+		$relation = static::$relations[$relation_name];
+		$class = $relation['class'];
+
+		switch ($relation['relation_type'])
+		{
+			case static::HAS_ONE:
+			{
+				$this->_related_objects[$relation_name] = $class::model()
+					->findBy($this->{$relation['fk']}, $this->pk());
+
+				break;
+			}
+
+			case static::BELONGS_TO:
+			{
+				$this->_related_objects[$relation_name] = $class::model()
+					->findByPk($this->{$relation['fk']});
+
+				break;
+			}
+		}
+
+		return $this;
 	}
 
 	protected function _find($multiple, $key = null)
@@ -450,26 +559,27 @@ class ActiveRecord
 	 * Extract object data for saving
 	 *
 	 * @param   array  $fields  Fields to extract
-	 * @return  array
+	 * @return  array  Object data to save
 	 */
 	protected function beforeSave(array $fields = null)
 	{
 		if ( ! $fields)
 		{
-			$fields = array_keys(static::$fields);
+			// Return all existing fields
+			return $this->_data;
 		}
 
 		$result = [];
 
 		foreach ($fields as $field)
 		{
-			if (isset($this->$field))
+			if (array_key_exists($field, $this->_data))
 			{
-				$result[$field] = $this->$field;
+				// Filter fields
+				$result[$field] = $this->_data[$field];
 			}
 		}
 
-		unset($result[static::$primary_key]);
 		return $result;
 	}
 
@@ -478,18 +588,52 @@ class ActiveRecord
 	protected function beforeDelete() {}
 	protected function afterDelete() {}
 
-	public function __sleep()
+	public function __get($key)
 	{
-		$result = [];
-
-		foreach (array_merge(array_keys(static::$fields), array_keys(static::$relations)) as $field)
+		if (isset(static::$fields[$key]))
 		{
-			if (property_exists($this, $field))
+			return $this->_data[$key];
+		}
+		elseif (isset(static::$relations[$key]))
+		{
+			if ( ! isset($this->_related_objects[$key]))
 			{
-				$result[] = $field;
+				// Relation is defined, but not loaded yet. Lazy load it
+				$this->_loadRelation($key);
 			}
+
+			return $this->_related_objects[$key];
+		}
+		elseif (method_exists($this, 'get'.$key))
+		{
+			return $this->{'get'.$key}();
 		}
 
-		return $result;
+		throw new ActiveRecord\Exception('Class '.get_class($this).' does not have property '.$key);
+	}
+
+	public function __set($key, $value)
+	{
+		if (isset(static::$fields[$key]))
+		{
+			$this->_data[$key] = $value;
+		}
+		elseif (isset(static::$relations[$key]))
+		{
+			$this->_related_objects[$key] = $value;
+		}
+		elseif (method_exists($this, 'set'.$key))
+		{
+			$this->{'set'.$key}($value);
+		}
+		else
+		{
+			throw new ActiveRecord\Exception('Class '.get_class($this).' does not have property '.$key);
+		}
+	}
+
+	public function __isset($key)
+	{
+		return (isset($this->_data[$key]) or isset($this->_related_objects[$key]));
 	}
 }
