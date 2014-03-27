@@ -4,7 +4,6 @@ namespace Stillman\Kohana;
 
 use Arr;
 use Database;
-use DB;
 
 class ActiveRecord
 {
@@ -28,9 +27,15 @@ class ActiveRecord
 
 	public static $primary_key = 'Id';
 
+	// Database instance
+	protected $_database_instance = null;
+
 	protected $_criteria = [];
 
 	protected $_errors = [];
+
+	// Changed values
+	protected $_changed = [];
 
 	/**
 	 * @var string Current scenario
@@ -88,7 +93,10 @@ class ActiveRecord
 
 		foreach ($class::$fields as $field => $val)
 		{
-			$object->$field = isset($array[$field]) ? $array[$field] : $val['default'];
+			if (array_key_exists($field, $array))
+			{
+				$object->$field = $array[$field];
+			}
 		}
 
 		$object->afterLoad();
@@ -357,13 +365,18 @@ class ActiveRecord
 		}
 
 		$this->beforeDelete();
-		return DB::delete(static::$table_name)->where(static::$primary_key, '=', $this->pk())->execute();
+
+		return \DB::delete(static::$table_name)
+			->where(static::$primary_key, '=', $this->pk())
+			->execute($this->_database_instance);
+
 		$this->afterDelete();
 	}
 
 	public function deleteAll()
 	{
-		return DB::delete_rows(['FROM' => static::$table_name] + $this->_criteria)->execute();
+		return \DB::delete_rows(['FROM' => static::$table_name] + $this->_criteria)
+			->execute($this->_database_instance);
 	}
 
 	public function count()
@@ -374,7 +387,7 @@ class ActiveRecord
 		unset($criteria['ORDER_BY'], $criteria['LIMIT'], $criteria['OFFSET']);
 		$criteria['SELECT'] = 'COUNT(*) cnt';
 
-		return (int) DB::find($criteria)->execute()->get('cnt');
+		return (int) \DB::find($criteria)->execute()->get('cnt');
 	}
 
 	/**
@@ -402,28 +415,34 @@ class ActiveRecord
 		return $this;
 	}
 
-	public function save($run_validation = true, array $fields = null)
+	public function save($run_validation = true)
 	{
+		$this->beforeSave();
+
 		if ( ! $run_validation or $this->validate())
 		{
-			$data = $this->beforeSave($fields);
-			$pk = isset($data[static::$primary_key]) ? $data[static::$primary_key] : null;
-			unset($data[static::$primary_key]);
+			if ($this->_changed)
+			{
+				if ($this->isNew())
+				{
+					// Adding a new record
+					list($this->{static::$primary_key}) = \DB::insert_row(
+						static::$table_name,
+						$this->_changed,
+						$this->_database_instance
+					);
+				}
+				else
+				{
+					// Updating existing record
+					\DB::update(static::$table_name)
+						->set($this->_changed)
+						->where(static::$primary_key, '=', $pk)
+						->execute($this->_database_instance);
+				}
 
-			if ( ! $pk)
-			{
-				// Adding a new record
-				list($this->{static::$primary_key}) = DB::insert(static::$table_name, array_keys($data))
-					->values($data)
-					->execute();
-			}
-			else
-			{
-				// Updating existing record
-				DB::update(static::$table_name)
-					->set($data)
-					->where(static::$primary_key, '=', $pk)
-					->execute();
+				// Reset changed values
+				$this->_changed = [];
 			}
 
 			$this->afterSave();
@@ -435,19 +454,19 @@ class ActiveRecord
 
 	/**
 	 * Mass assign values
-	 * Example: $model->assign($_POST);
+	 * Example: $model->populate($_POST);
 	 * Mass-assignment fields must have 'safe' attribute
 	 *
 	 * @param   array  $data
 	 * @return  $this
 	 */
-	public function assign(array $data)
+	public function populate(array $data)
 	{
 		foreach ($data as $field => $value)
 		{
 			if ( ! empty(static::$fields[$field]['safe']))
 			{
-				$this->$field = $value;
+				$this->__set($field, $value);
 			}
 		}
 
@@ -461,8 +480,14 @@ class ActiveRecord
 	 */
 	public function validate()
 	{
-		$this->_errors = [];
-		return true;
+		$this->resetErrors();
+		$this->_validate();
+		return ! $this->hasErrors();
+	}
+
+	public function asArray()
+	{
+		return $this->_data;
 	}
 
 	/**
@@ -473,6 +498,24 @@ class ActiveRecord
 	public function getErrors()
 	{
 		return $this->_errors;
+	}
+
+	public function hasErrors()
+	{
+		return (bool) $this->_errors;
+	}
+
+	public function addError($field, $error, $replace = false)
+	{
+		if ($replace or ! isset($this->_errors[$field]))
+		{
+			$this->_errors[$field] = $error;
+		}
+	}
+
+	public function resetErrors()
+	{
+		$this->_errors = [];
 	}
 
 	/**
@@ -511,9 +554,9 @@ class ActiveRecord
 
 	protected function _find($multiple, $key = null)
 	{
-		$query = DB::find($this->_criteria);
+		$query = \DB::find($this->_criteria);
 		$start_time = microtime(true);
-		$result = $query->execute();
+		$result = $query->execute($this->_database_instance);
 
 		if (static::$profiling)
 		{
@@ -555,44 +598,13 @@ class ActiveRecord
 		return $arr;
 	}
 
-	/**
-	 * Extract object data for saving
-	 *
-	 * @param   array  $fields  Fields to extract
-	 * @return  array  Object data to save
-	 */
-	protected function beforeSave(array $fields = null)
-	{
-		if ( ! $fields)
-		{
-			// Return all existing fields
-			return $this->_data;
-		}
-
-		$result = [];
-
-		foreach ($fields as $field)
-		{
-			if (array_key_exists($field, $this->_data))
-			{
-				// Filter fields
-				$result[$field] = $this->_data[$field];
-			}
-		}
-
-		return $result;
-	}
-
-	protected function afterLoad() {}
-	protected function afterSave() {}
-	protected function beforeDelete() {}
-	protected function afterDelete() {}
-
 	public function __get($key)
 	{
 		if (isset(static::$fields[$key]))
 		{
-			return $this->_data[$key];
+			return array_key_exists($key, $this->_data)
+				? $this->_data[$key]
+				: static::$fields[$key]['default'];
 		}
 		elseif (isset(static::$relations[$key]))
 		{
@@ -617,6 +629,7 @@ class ActiveRecord
 		if (isset(static::$fields[$key]))
 		{
 			$this->_data[$key] = $value;
+			$this->_changed[$key] = $value;
 		}
 		elseif (isset(static::$relations[$key]))
 		{
@@ -636,4 +649,21 @@ class ActiveRecord
 	{
 		return (isset($this->_data[$key]) or isset($this->_related_objects[$key]));
 	}
+
+	public function __unset($key)
+	{
+		unset($this->_data[$key], $this->_changed[$key], $this->_related_objects[$key]);
+	}
+
+	protected function afterLoad() {}
+
+	protected function beforeSave() {}
+
+	protected function afterSave() {}
+
+	protected function beforeDelete() {}
+
+	protected function afterDelete() {}
+
+	protected function _validate() {}
 }
