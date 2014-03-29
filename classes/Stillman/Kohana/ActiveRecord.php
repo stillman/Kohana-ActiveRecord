@@ -61,6 +61,42 @@ class ActiveRecord
 		return new $class;
 	}
 
+	public static function findBySql($sql, array $params = [])
+	{
+		return static::_findBySql($sql, $params, false);
+	}
+
+	public static function findAllBySql($sql, array $params = [])
+	{
+		return static::_findBySql($sql, $params, true);
+	}
+
+	protected static function _findBySql($sql, array $params = [], $multiple = true)
+	{
+		$data = \DB::query(\Database::SELECT, $sql)
+			->parameters($params)
+			->execute();
+
+		if ($multiple)
+		{
+			$result = [];
+
+			foreach ($data as $row)
+			{
+				$result [] = static::_createObject($row);
+			}
+
+			return $result;
+		}
+		else
+		{
+			if ( ! count($data))
+				return null;
+
+			return static::_createObject($data->current());
+		}
+	}
+
 	/**
 	 * Create an object or array of objects of the specified class
 	 *
@@ -95,7 +131,8 @@ class ActiveRecord
 		{
 			if (array_key_exists($field, $array))
 			{
-				$object->$field = $array[$field];
+				// Set object properties directly
+				$object->_data[$field] = $array[$field];
 			}
 		}
 
@@ -109,7 +146,7 @@ class ActiveRecord
 	 * @param   array  $values  Data array
 	 * @return  \Stillman\Kohana\ActiveRecord
 	 */
-	protected static function _createObject(array $values)
+	protected static function _createObject($values)
 	{
 		foreach ($values as $key => $value)
 		{
@@ -575,7 +612,10 @@ class ActiveRecord
 			$result = $result->current();
 
 			if ( ! $result)
-				return false;
+			{
+				// Nothing found
+				return null;
+			}
 
 			return static::_createObject($result);
 		}
