@@ -18,6 +18,8 @@ class ActiveRecord
 	const RIGHT_JOIN = 'RIGHT JOIN';
 	const INNER_JOIN = 'INNER JOIN';
 
+	public static $table_name;
+
 	// Set to true to enable profiling
 	public static $profiling = false;
 
@@ -305,10 +307,7 @@ class ActiveRecord
 			}
 		}
 
-		$table1 = $class1::$table_name;
-		$table2 = $class2::$table_name;
 		$table2alias = $alias;
-
 		$relation_type = $class1::$relations[$_]['relation_type'];
 
 		$filter = ! empty($class1::$relations[$_]['filter']) ? ' AND '.$class1::$relations[$_]['filter'] : '';
@@ -360,6 +359,9 @@ class ActiveRecord
 		return $this->_criteria;
 	}
 
+	/**
+	 * @return $this
+	 */
 	public function find()
 	{
 		return $this->_find(false);
@@ -373,7 +375,7 @@ class ActiveRecord
 	public function findBy($field, $value, array $criteria = [], $multiple = false)
 	{
 		$param_name = uniqid(':', true);
-		$this->_criteria['WHERE'] = ["$field = $param_name"];
+		$this->_criteria['WHERE'] = ["t.$field = $param_name"];
 		$this->_criteria['params'][$param_name] = $value;
 
 		if ($criteria)
@@ -394,20 +396,31 @@ class ActiveRecord
 		return $this->findBy(static::$primary_key, $id, $criteria);
 	}
 
-	public function delete()
+	/**
+	 * @param bool $execute_after_delete  Whether afterDelete event should be executed
+	 * @return bool
+	 * @throws ActiveRecord\Exception
+	 */
+	public function delete($execute_after_delete = true)
 	{
 		if ($this->isNew())
 		{
-			throw new ActiveRecord\Exception('Can not delete object that hasn\'t been saved yet');
+			throw new ActiveRecord\Exception('Can not delete object that haven\'t been saved yet');
 		}
 
 		$this->beforeDelete();
 
-		return \DB::delete(static::$table_name)
+		$result = (bool) \DB::delete(static::$table_name)
 			->where(static::$primary_key, '=', $this->pk())
 			->execute($this->_database_instance);
 
-		$this->afterDelete();
+		if ($result and $execute_after_delete)
+		{
+			// Execute this only if row really was deleted
+			$this->afterDelete();
+		}
+
+		return $result;
 	}
 
 	public function deleteAll()
@@ -444,6 +457,7 @@ class ActiveRecord
 	 *
 	 * @since 1.1.2
 	 *
+	 * @param  string  $scenario
 	 * @return $this
 	 */
 	public function setScenario($scenario)
@@ -474,7 +488,7 @@ class ActiveRecord
 					// Updating existing record
 					\DB::update(static::$table_name)
 						->set($this->_changed)
-						->where(static::$primary_key, '=', $pk)
+						->where(static::$primary_key, '=', $this->pk())
 						->execute($this->_database_instance);
 				}
 
@@ -522,13 +536,29 @@ class ActiveRecord
 		return ! $this->hasErrors();
 	}
 
-	public function asArray()
+	/**
+	 * Return model properties as array
+	 *
+	 * @param  array|null $fields Field names to extract (since 1.3.0)
+	 * @return array
+	 */
+	public function asArray(array $fields = null)
 	{
-		return $this->_data;
+		if ($fields)
+			return Arr::extract($this->_data, $fields);
+
+		$result = $this->_data;
+
+		foreach ($this->_related_objects as $key => $object)
+		{
+			$result[$key] = $object->asArray();
+		}
+
+		return $result;
 	}
 
 	/**
-	 * Retreive the validation errors
+	 * Retrieve the validation errors
 	 *
 	 * @return  array
 	 */
@@ -558,9 +588,8 @@ class ActiveRecord
 	/**
 	 * Lazy load a relation
 	 *
-	 * @param  string  $relation_name The name of a relation
-	 *
-	 * @return $this
+	 * @param   string  $relation_name The name of a relation
+	 * @return  $this
 	 */
 	protected function _loadRelation($relation_name)
 	{
@@ -664,12 +693,45 @@ class ActiveRecord
 		throw new ActiveRecord\Exception('Class '.get_class($this).' does not have property '.$key);
 	}
 
+	/**
+	 * @param string $field
+	 * @param mixed $value
+	 * @param bool $preproccess
+	 * @param bool $mark_as_changed
+	 * @return $this
+	 * @throws ActiveRecord\Exception
+	 * @since 1.3.0
+	 */
+	public function set($field, $value, $preproccess = true, $mark_as_changed = true)
+	{
+		if (isset(static::$fields[$field]))
+		{
+			if ($preproccess)
+			{
+				$value = $this->preproccess($field, $value);
+			}
+
+			$this->_data[$field] = $value;
+
+			if ($mark_as_changed)
+			{
+				// Mark value as changed
+				$this->_changed[$field] = $value;
+			}
+
+			return $this;
+		}
+		else
+		{
+			throw new ActiveRecord\Exception('Class '.get_class($this).' does not have property '.$field);
+		}
+	}
+
 	public function __set($key, $value)
 	{
 		if (isset(static::$fields[$key]))
 		{
-			$this->_data[$key] = $value;
-			$this->_changed[$key] = $value;
+			$this->set($key, $value);
 		}
 		elseif (isset(static::$relations[$key]))
 		{
@@ -706,4 +768,15 @@ class ActiveRecord
 	protected function afterDelete() {}
 
 	protected function _validate() {}
+
+	/**
+	 * @since 1.3.0
+	 * @param string $key
+	 * @param mixed $value
+	 * @return mixed
+	 */
+	protected function preproccess($key, $value)
+	{
+		return $value;
+	}
 }
