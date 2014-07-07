@@ -25,6 +25,8 @@ class ActiveRecord
 
 	public static $fields = [];
 
+	public static $default_filter = null;
+
 	public static $relations = [];
 
 	public static $primary_key = 'Id';
@@ -519,7 +521,7 @@ class ActiveRecord
 	{
 		foreach (static::$fields as $field => $params)
 		{
-			if ( ! empty($params['safe']) and isset($data[$field]))
+			if (isset($params['safe']) and isset($data[$field]))
 			{
 				$this->set($field, $data[$field]);
 			}
@@ -712,7 +714,12 @@ class ActiveRecord
 		{
 			$pre_filter = isset(static::$fields[$field]['safe']) ? static::$fields[$field]['safe'] : null;
 
-			if ($preproccess and $pre_filter and $pre_filter !== true)
+			if ($pre_filter === true)
+			{
+				$pre_filter = static::$default_filter;
+			}
+
+			if ($preproccess and $pre_filter)
 			{
 				// Prefilter the value
 				$value = call_user_func($pre_filter, $value, $this);
