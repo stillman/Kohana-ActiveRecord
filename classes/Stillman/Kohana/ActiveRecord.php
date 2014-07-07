@@ -397,18 +397,22 @@ class ActiveRecord
 	}
 
 	/**
+	 * @param bool $execute_before_delete  Whether beforeDelete event should be executed
 	 * @param bool $execute_after_delete  Whether afterDelete event should be executed
 	 * @return bool
 	 * @throws ActiveRecord\Exception
 	 */
-	public function delete($execute_after_delete = true)
+	public function delete($execute_before_delete = true, $execute_after_delete = true)
 	{
 		if ($this->isNew())
 		{
 			throw new ActiveRecord\Exception('Can not delete object that haven\'t been saved yet');
 		}
 
-		$this->beforeDelete();
+		if ($execute_before_delete)
+		{
+			$this->beforeDelete();
+		}
 
 		$result = (bool) \DB::delete(static::$table_name)
 			->where(static::$primary_key, '=', $this->pk())
@@ -513,11 +517,11 @@ class ActiveRecord
 	 */
 	public function populate(array $data)
 	{
-		foreach ($data as $field => $value)
+		foreach (static::$fields as $field => $params)
 		{
-			if ( ! empty(static::$fields[$field]['safe']))
+			if ( ! empty($params['safe']) and isset($data[$field]))
 			{
-				$this->__set($field, $value);
+				$this->set($field, $data[$field]);
 			}
 		}
 
@@ -706,9 +710,12 @@ class ActiveRecord
 	{
 		if (isset(static::$fields[$field]))
 		{
-			if ($preproccess)
+			$pre_filter = isset(static::$fields[$field]['safe']) ? static::$fields[$field]['safe'] : null;
+
+			if ($preproccess and $pre_filter and $pre_filter !== true)
 			{
-				$value = $this->preproccess($field, $value);
+				// Prefilter the value
+				$value = call_user_func($pre_filter, $value, $this);
 			}
 
 			$this->_data[$field] = $value;
@@ -768,15 +775,4 @@ class ActiveRecord
 	protected function afterDelete() {}
 
 	protected function _validate() {}
-
-	/**
-	 * @since 1.3.0
-	 * @param string $key
-	 * @param mixed $value
-	 * @return mixed
-	 */
-	protected function preproccess($key, $value)
-	{
-		return $value;
-	}
 }
