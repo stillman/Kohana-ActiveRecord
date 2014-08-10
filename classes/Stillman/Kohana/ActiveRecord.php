@@ -488,6 +488,8 @@ class ActiveRecord
 						$this->_changed,
 						$this->_database_instance
 					);
+
+					$this->afterCreate();
 				}
 				else
 				{
@@ -496,6 +498,8 @@ class ActiveRecord
 						->set($this->_changed)
 						->where(static::$primary_key, '=', $this->pk())
 						->execute($this->_database_instance);
+
+					$this->afterUpdate();
 				}
 
 				// Reset changed values
@@ -776,6 +780,10 @@ class ActiveRecord
 	protected function beforeSave() {}
 
 	protected function afterSave() {}
+
+	protected function afterCreate() {}
+
+	protected function afterUpdate() {}
 
 	protected function beforeDelete() {}
 
