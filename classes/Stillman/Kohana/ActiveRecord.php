@@ -57,6 +57,11 @@ class ActiveRecord
 	 */
 	protected $_related_objects = [];
 
+	/**
+	 * @var bool Is this a new object of loaded from a database?
+	 */
+	protected $_loaded = false;
+
 	public static function model($class = null)
 	{
 		if ($class === null)
@@ -130,6 +135,7 @@ class ActiveRecord
 		}
 
 		$object = new $class;
+		$object->_loaded = true;
 
 		foreach ($class::$fields as $field => $val)
 		{
@@ -217,7 +223,7 @@ class ActiveRecord
 
 	public function isNew()
 	{
-		return empty($this->{static::$primary_key});
+		return ! $this->_loaded;
 	}
 
 	public function resetCriteria()
@@ -489,6 +495,7 @@ class ActiveRecord
 						$this->_database_instance
 					);
 
+					$this->_loaded = true;
 					$this->afterCreate();
 				}
 				else
@@ -726,7 +733,19 @@ class ActiveRecord
 			if ($preproccess and $pre_filter)
 			{
 				// Prefilter the value
-				$value = call_user_func($pre_filter, $value, $this);
+				if (is_array($pre_filter))
+				{
+					// Use multiple filters
+					foreach ($pre_filter as $_filter)
+					{
+						$value = call_user_func($_filter, $value, $this);
+					}
+				}
+				else
+				{
+					// Use one filter
+					$value = call_user_func($pre_filter, $value, $this);
+				}
 			}
 
 			$this->_data[$field] = $value;
