@@ -136,6 +136,7 @@ class ActiveRecord
 
 		$object = new $class;
 		$object->_loaded = true;
+		$object->_changed = [];
 
 		foreach ($class::$fields as $field => $val)
 		{
@@ -356,10 +357,12 @@ class ActiveRecord
 
 	/**
 	 * Get primary key value
+	 *
+	 * @return int
 	 */
 	public function pk()
 	{
-		return $this->{static::$primary_key};
+		return (int) $this->{static::$primary_key};
 	}
 
 	public function getCriteria()
@@ -375,11 +378,19 @@ class ActiveRecord
 		return $this->_find(false);
 	}
 
-	public function findAll($key = null)
+	public function findAll($key = null, $value = null)
 	{
-		return $this->_find(true, $key);
+		return $this->_find(true, $key, $value);
 	}
 
+	/**
+	 * @param $field
+	 * @param $value
+	 * @param array $criteria
+	 * @param bool $multiple
+	 *
+	 * @return self
+	 */
 	public function findBy($field, $value, array $criteria = [], $multiple = false)
 	{
 		$param_name = uniqid(':', true);
@@ -635,7 +646,7 @@ class ActiveRecord
 		return $this;
 	}
 
-	protected function _find($multiple, $key = null)
+	protected function _find($multiple, $key = null, $value = null)
 	{
 		$query = \DB::find($this->_criteria);
 		$start_time = microtime(true);
@@ -668,7 +679,10 @@ class ActiveRecord
 
 		if ($key !== null)
 		{
-			$result = $result->as_array($key);
+			$result = $result->as_array($key, $value);
+
+			if ($value !== null)
+				return $result;
 		}
 
 		if ( ! count($result))
