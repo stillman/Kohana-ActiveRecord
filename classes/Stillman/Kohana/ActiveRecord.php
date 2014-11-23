@@ -497,12 +497,14 @@ class ActiveRecord
 		{
 			if ($this->_changed)
 			{
+				$fields = array_intersect_key($this->_data, $this->_changed);
+
 				if ($this->isNew())
 				{
 					// Adding a new record
 					list($this->{static::$primary_key}) = \DB::insert_row(
 						static::$table_name,
-						$this->_changed,
+						$fields,
 						$this->_database_instance
 					);
 
@@ -513,7 +515,7 @@ class ActiveRecord
 				{
 					// Updating existing record
 					\DB::update(static::$table_name)
-						->set($this->_changed)
+						->set($fields)
 						->where(static::$primary_key, '=', $this->pk())
 						->execute($this->_database_instance);
 
@@ -767,7 +769,7 @@ class ActiveRecord
 			if ($mark_as_changed)
 			{
 				// Mark value as changed
-				$this->_changed[$field] = $value;
+				$this->_changed[$field] = true;
 			}
 
 			return $this;
