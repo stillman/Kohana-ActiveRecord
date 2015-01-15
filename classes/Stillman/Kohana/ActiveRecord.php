@@ -4,6 +4,7 @@ namespace Stillman\Kohana;
 
 use Arr;
 use Database;
+use DB;
 
 class ActiveRecord
 {
@@ -82,7 +83,7 @@ class ActiveRecord
 
 	protected static function _findBySql($sql, array $params = [], $multiple = true)
 	{
-		$data = \DB::query(\Database::SELECT, $sql)
+		$data = DB::query(Database::SELECT, $sql)
 			->parameters($params)
 			->execute();
 
@@ -117,6 +118,7 @@ class ActiveRecord
 	 */
 	public static function create(array $array, $multiple = false, $class = null)
 	{
+		/** @var static $class */
 		if ($class === null)
 		{
 			$class = static::class;
@@ -134,6 +136,7 @@ class ActiveRecord
 			return $objects;
 		}
 
+		/** @var static $object */
 		$object = new $class;
 		$object->_loaded = true;
 		$object->_changed = [];
@@ -155,7 +158,7 @@ class ActiveRecord
 	 * Create object (including compound objects) from array of data
 	 *
 	 * @param   array  $values  Data array
-	 * @return  \Stillman\Kohana\ActiveRecord
+	 * @return  self
 	 */
 	protected static function _createObject($values)
 	{
@@ -204,8 +207,18 @@ class ActiveRecord
 		return $object;
 	}
 
-	public function __construct()
+	public function __construct(array $fields = [])
 	{
+		foreach ($fields as $field => $value)
+		{
+			$this->set($field, $value, false, true);
+		}
+
+		if ( ! empty($fields[static::$primary_key]))
+		{
+			$this->_loaded = true;
+		}
+
 		$this->resetCriteria();
 	}
 
@@ -277,7 +290,7 @@ class ActiveRecord
 	/**
 	 * Load relation along with object
 	 *
-	 * @throws \Stillman\Kohana\ActiveRecord\Exception;
+	 * @throws ActiveRecord\Exception;
 	 *
 	 * @param  string  $alias          Relation name
 	 * @param  string  $join_type      Join type
@@ -319,7 +332,9 @@ class ActiveRecord
 		$table2alias = $alias;
 		$relation_type = $class1::$relations[$_]['relation_type'];
 
-		$filter = ! empty($class1::$relations[$_]['filter']) ? ' AND '.$class1::$relations[$_]['filter'] : '';
+		$filter = ! empty($class1::$relations[$_]['filter'])
+			? ' AND '.$class1::$relations[$_]['filter']
+			: '';
 
 		if ($filter)
 		{
@@ -384,35 +399,39 @@ class ActiveRecord
 	}
 
 	/**
-	 * @param $field
-	 * @param $value
-	 * @param array $criteria
-	 * @param bool $multiple
+	 * Add one or more equality conditions to the search criteria
+	 *
+	 * @param string|array $key
+	 * @param mixed $value
+	 * @param string $op Comparing operator (<, <=, =, >=, > etc)
 	 *
 	 * @return self
 	 */
-	public function findBy($field, $value, array $criteria = [], $multiple = false)
+	public function where($key, $value = null, $op = '=')
 	{
-		$param_name = uniqid(':', true);
-		$this->_criteria['WHERE'] = ["t.$field = $param_name"];
-		$this->_criteria['params'][$param_name] = $value;
-
-		if ($criteria)
+		if ( ! is_array($key))
 		{
-			$this->addCriteria($criteria);
+			$key = [$key => $value];
 		}
 
-		return $this->_find($multiple);
-	}
+		$conditions = [];
+		$params = [];
 
-	public function findAllBy($field, $value, array $criteria = [])
-	{
-		return $this->findBy($field, $value, $criteria, true);
+		foreach ($key as $k => $v)
+		{
+			$param_name = uniqid(':__param_', true);
+			$conditions[] = "$k $op $param_name";
+			$params[$param_name] = $v;
+		}
+
+		return $this->addCondition('('.implode(' AND ', $conditions).')', $params);
 	}
 
 	public function findByPk($id, array $criteria = [])
 	{
-		return $this->findBy(static::$primary_key, $id, $criteria);
+		return $this->where(static::$primary_key, $id)
+			->addCriteria($criteria)
+			->find();
 	}
 
 	/**
@@ -433,7 +452,7 @@ class ActiveRecord
 			$this->beforeDelete();
 		}
 
-		$result = (bool) \DB::delete(static::$table_name)
+		$result = (bool) DB::delete(static::$table_name)
 			->where(static::$primary_key, '=', $this->pk())
 			->execute($this->_database_instance);
 
@@ -448,7 +467,7 @@ class ActiveRecord
 
 	public function deleteAll()
 	{
-		return \DB::delete_rows(['FROM' => static::$table_name] + $this->_criteria)
+		return DB::delete_rows(['FROM' => static::$table_name] + $this->_criteria)
 			->execute($this->_database_instance);
 	}
 
@@ -460,7 +479,9 @@ class ActiveRecord
 		unset($criteria['ORDER_BY'], $criteria['LIMIT'], $criteria['OFFSET']);
 		$criteria['SELECT'] = 'COUNT(*) cnt';
 
-		return (int) \DB::find($criteria)->execute()->get('cnt');
+		return (int) DB::find($criteria)
+			->execute($this->_database_instance)
+			->get('cnt');
 	}
 
 	/**
@@ -502,7 +523,7 @@ class ActiveRecord
 				if ($this->isNew())
 				{
 					// Adding a new record
-					list($this->{static::$primary_key}) = \DB::insert_row(
+					list($this->{static::$primary_key}) = DB::insert_row(
 						static::$table_name,
 						$fields,
 						$this->_database_instance
@@ -514,7 +535,7 @@ class ActiveRecord
 				else
 				{
 					// Updating existing record
-					\DB::update(static::$table_name)
+					DB::update(static::$table_name)
 						->set($fields)
 						->where(static::$primary_key, '=', $this->pk())
 						->execute($this->_database_instance);
@@ -570,18 +591,23 @@ class ActiveRecord
 	 * Return model properties as array
 	 *
 	 * @param  array|null $fields Field names to extract (since 1.3.0)
+	 * @param  bool  $include_related  Whether to include related objects
 	 * @return array
 	 */
-	public function asArray(array $fields = null)
+	public function asArray(array $fields = null, $include_related = true)
 	{
 		if ($fields)
 			return Arr::extract($this->_data, $fields);
 
 		$result = $this->_data;
 
-		foreach ($this->_related_objects as $key => $object)
+		if ($include_related)
 		{
-			$result[$key] = $object->asArray();
+			foreach ($this->_related_objects as $key => $object)
+			{
+				/** @var static $object */
+				$result[$key] = $object->asArray($fields, true);
+			}
 		}
 
 		return $result;
@@ -650,7 +676,7 @@ class ActiveRecord
 
 	protected function _find($multiple, $key = null, $value = null)
 	{
-		$query = \DB::find($this->_criteria);
+		$query = DB::find($this->_criteria);
 		$start_time = microtime(true);
 		$result = $query->execute($this->_database_instance);
 
@@ -739,7 +765,9 @@ class ActiveRecord
 	{
 		if (isset(static::$fields[$field]))
 		{
-			$pre_filter = isset(static::$fields[$field]['safe']) ? static::$fields[$field]['safe'] : null;
+			$pre_filter = isset(static::$fields[$field]['safe'])
+				? static::$fields[$field]['safe']
+				: null;
 
 			if ($pre_filter === true)
 			{
