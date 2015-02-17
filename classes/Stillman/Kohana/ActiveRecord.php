@@ -433,7 +433,7 @@ class ActiveRecord
 
 	public function findByPk($id, array $criteria = [])
 	{
-		return $this->where(static::$primary_key, $id)
+		return $this->where('t.'.static::$primary_key, $id)
 			->addCriteria($criteria)
 			->find();
 	}
