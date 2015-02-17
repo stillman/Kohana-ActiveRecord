@@ -63,6 +63,10 @@ class ActiveRecord
 	 */
 	protected $_loaded = false;
 
+	/**
+	 * @param string|null $class
+	 * @return static
+	 */
 	public static function model($class = null)
 	{
 		if ($class === null)
@@ -669,6 +673,12 @@ class ActiveRecord
 
 				break;
 			}
+		}
+
+		if ( ! $this->_related_objects[$relation_name])
+		{
+			// Relation has not been loaded
+			$this->_related_objects[$relation_name] = new $class;
 		}
 
 		return $this;
