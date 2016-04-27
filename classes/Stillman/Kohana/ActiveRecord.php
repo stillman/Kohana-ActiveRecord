@@ -4,7 +4,6 @@ namespace Stillman\Kohana;
 
 use Arr;
 use Database;
-use DB;
 
 class ActiveRecord
 {
@@ -87,7 +86,7 @@ class ActiveRecord
 
 	protected static function _findBySql($sql, array $params = [], $multiple = true)
 	{
-		$data = DB::query(Database::SELECT, $sql)
+		$data = \DB::query(Database::SELECT, $sql)
 			->parameters($params)
 			->execute();
 
@@ -456,7 +455,7 @@ class ActiveRecord
 			$this->beforeDelete();
 		}
 
-		$result = (bool) DB::delete(static::$table_name)
+		$result = (bool) \DB::delete(static::$table_name)
 			->where(static::$primary_key, '=', $this->pk())
 			->execute($this->_database_instance);
 
@@ -471,7 +470,7 @@ class ActiveRecord
 
 	public function deleteAll()
 	{
-		return DB::delete_rows(['FROM' => static::$table_name] + $this->_criteria)
+		return \DB::delete_rows(['FROM' => static::$table_name] + $this->_criteria)
 			->execute($this->_database_instance);
 	}
 
@@ -483,7 +482,7 @@ class ActiveRecord
 		unset($criteria['ORDER_BY'], $criteria['LIMIT'], $criteria['OFFSET']);
 		$criteria['SELECT'] = 'COUNT(*) cnt';
 
-		return (int) DB::find($criteria)
+		return (int) \DB::find($criteria)
 			->execute($this->_database_instance)
 			->get('cnt');
 	}
@@ -527,7 +526,7 @@ class ActiveRecord
 				if ($this->isNew())
 				{
 					// Adding a new record
-					list($this->{static::$primary_key}) = DB::insert_row(
+					list($this->{static::$primary_key}) = \DB::insert_row(
 						static::$table_name,
 						$fields,
 						$this->_database_instance
@@ -539,7 +538,7 @@ class ActiveRecord
 				else
 				{
 					// Updating existing record
-					DB::update(static::$table_name)
+					\DB::update(static::$table_name)
 						->set($fields)
 						->where(static::$primary_key, '=', $this->pk())
 						->execute($this->_database_instance);
@@ -686,7 +685,7 @@ class ActiveRecord
 
 	protected function _find($multiple, $key = null, $value = null)
 	{
-		$query = DB::find($this->_criteria);
+		$query = \DB::find($this->_criteria);
 		$start_time = microtime(true);
 		$result = $query->execute($this->_database_instance);
 
@@ -715,7 +714,7 @@ class ActiveRecord
 			return static::_createObject($result);
 		}
 
-		if ($key !== null)
+		if ($key !== null or $value !== null)
 		{
 			$result = $result->as_array($key, $value);
 
