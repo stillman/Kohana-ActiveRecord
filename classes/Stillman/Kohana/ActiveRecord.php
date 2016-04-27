@@ -447,7 +447,7 @@ class ActiveRecord
 	{
 		if ($this->isNew())
 		{
-			throw new ActiveRecord\Exception('Can not delete object that haven\'t been saved yet');
+			throw new ActiveRecord\Exception('Can not delete object that has not been saved yet');
 		}
 
 		if ($execute_before_delete)
