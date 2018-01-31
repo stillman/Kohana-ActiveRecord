@@ -4,7 +4,7 @@
 	"type": "kohana-module",
 	"keywords": ["Kohana", "database", "ar", "activerecord", "active record"],
 	"homepage": "http://github.com/Stillman/Kohana-ActiveRecord",
-	"license": "GPL",
+	"license": "GPL-3.0-or-later",
 
 	"authors": [
 		{
